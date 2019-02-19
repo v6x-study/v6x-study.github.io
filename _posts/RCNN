@@ -1,0 +1,121 @@
+
+# Region with CNN features
+
+* 논문 링크: https://arxiv.org/pdf/1311.2524.pdf
+* 참조: https://jamiekang.github.io/2017/05/28/faster-r-cnn/
+* 참조: https://zzsza.github.io/data/2018/05/09/Faster-RCNN-review/
+* 참조: https://gist.github.com/aisolab/46f73657c7fcbec91004708e01a67ba0
+
+mAP: mean average precision
+- 각 클래스에 대해 average precision 계산
+- 이것을 mean한 값.
+
+
+## Object detection의 세 가지 task
+
+1. 물체가 있을만한 곳에 바운딩 박스를 치는 것(Region Proposal)
+2. 바운딩 박스에 무엇이 있는지 분류하는 것
+3. 비운딩 박스를 옮기는 것
+  * 중심점을 얼마나 옮길것인지
+  * 종횡비를 얼마나 바꿀것인지
+  
+  
+  초기 RCNN은 2000개 정도 박스를 추출해서, 해당 박스에 어떤 물체가 있는지 CNN으로 feature를 추출한 뒤 linear SVM으로 분류하는 방식으로 detection을 수행했다.
+  때문에 이미지 하나당 2000번이나 inference해야해서 시간이 매우 오래 걸렸음.
+
+
+## Abstract & Introduction
+
+CNN에 대한 간략한 소개
+* 이전의 비전 테스크는 SIFT와 HOG에 많이 의존해있었음. 2010-12년도 사이에 큰 진보가 없었다. (SIFT와 HOG:https://darkpgmr.tistory.com/116)
+* CNN은 “neocognition” 즉 생물학적 영감을 받은 계층적이고 shift-invariant한 모델을 발전시킨 것인데 1990년대에 유행하다가 SVM이 나타나면서 쓰이지 않게 되었음.
+
+이 논문의 contribution은 다음과 같다.
+
+1. 고성능의 CNN모델을 bottom-up region proposal방식으로 `object detection`과 `segmentation`에 사용할 수 있다.
+2. `Domain-specific fine tuning`기법을 가지고 적은 데이터를 가지고도 높은 capacity를 가지는 모델을 만들 수 있음을 보인다.
+
+
+
+
+#### Localization(Region proposal)
+
+* Object detection의 가장 큰 문제중 하나는 localization(Region proposal)이다.
+* 기존 방법론에서는 sliding-window방식으로 풀기도 한다.
+* 그러나 네트워크가 깊어지면 리셉티브 필드가 너무 커져서 쓸모가 없는 것으로 드러남.
+
+우리는 대신에 “recognition using regions”패러다임을 제시한다.
+
+* Object detection과 semantic segmentaiton에 둘다 유용하다.
+* 순서는 다음과 같다.
+* region 제안-> affine image warp -> CNN분류 -> linear SVM
+
+bounding box label이 있는 데이터가 많이 없을 때 어떻게 다룰 것인지 역시 제시하였다.(fine-tuning기법)
+
+* `unsupervised pre-training` -> `supervised fine-tuning`
+* 대량의 보조 데이터에 대해서 감독학습으로 pre-trianing (이미지넷 데이터셋)
+* 적은 데이터셋에 대해 fine-tuning(PASCAL)
+
+
+
+
+
+
+## R-CNN Network
+
+
+#### 1. module design
+
+(1) Region Proposal(카테고리와 무관하게)
+
+* selective search 방법(논문에서는 설명하지 않았음)
+
+(2) Feature extraction
+
+* 먼저 reshape함. 바운딩 박스 주변에 16픽셀이 존재하도록.
+* 그리고 cnn사용.
+
+(3) bounding-box regression
+
+* 위치를 보정해 줄 수 있는 bounding-box regression제안.
+* Bounding-box regressor의 학습 목표는 region proposal 와 정답 위치 가 존재할 때, 를 로 mapping할 수 있는 변환을 학습하는 것.(localization 성능 개선)
+* 추출된 피처 맵을 넣고, X,Y,W,H를 뽑는 regression 네트워크를 만들어서 트레이닝.
+
+(4) Linear-svm 모듈
+
+* fixed-length feature vector를 인풋으로 받아 분류함
+
+#### 2. Test-time detection
+
+Inference 단계에서 R-CNN은 다음의 과정으로 동작.(CPU에서 60초, GPU 13초가 걸린다.)
+
+1. Region proposal algorithm (eg. selective search) 로 2,000개 가량의 region 생성
+2. 각각의 region을 input으로 CNN이 fixed-length feature vector 들을 추출
+3. 각각의 fixed-length feature vector 를 input으로 각 class 별 Linear svm 이 score를 계산
+4. non-maximum suppresion을 이용, class score가 높은 region과 IoU (Intersection over Union)가 정해준 threshold 보다 큰 region들을 제거
+* Boundig-box regression 을 하는 경우, 3과 4사이에서 이루어지며, 이 때 fixed-length feature vector 를 input으로 bouding box의 (x, y, w, h)를 계산
+
+
+
+
+3. Training
+
+
+(1) Supervised pre-training
+* 이미지넷 데이터로 프리트레이닝 카페 사용(알렉스넷)
+
+(2) Domain-specific fine-tuning
+* 디텍션과 warped new domain에 적용시킴. 그리고 warped region proposal만 가지고 트레이닝 시켰다.
+* 마지막 분류하는 FC레이어를 (N+1)개짜리 (class N + background 1)로 바꾼것 말고는 그대로 썼음.
+* region proposal의 IOU 가 0.5보다 크면 positive examle로 봤다.
+* 0.001 러닝 레이트를 썼음. 
+* 트레인 할 때 32개의 positive window와 96개의 background window로 128개 짜리 배치를 만들어서 썼다.
+* 클래스당 하나의 linear SVM을 최적화 시켰다.
+
+4. Consquence
+
+
+* PASCAL 데이터셋에서 mAP가 기존 방법론 대비 35.1%에서 53.7%로 증가
+* 바운딩박스 regerssion쓰면 추가적으로 성능 증가
+
+
