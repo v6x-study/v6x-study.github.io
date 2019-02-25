@@ -1,0 +1,81 @@
+---
+layout: posts
+title:  "YOLO"
+date:   2019-02-25 14:20:05 +0900
+author: chaddy1004
+categories: object-detection
+---
+
+
+# Yolo
+
+
+
+## 개요
+
+- YOLO 는 You Only Look Once의 약자이다 
+
+  - 이미지를 한번만 보고 bounding box와 그에 맞는 classification을 동시에 해버린다.
+
+  
+
+  - This allows YOLO to be a lot faster 
+
+## 이전 모델의 문제점 
+
+이전 모델들인 R-CNN, Fast R-CNN, 그리고 심지어 Faster R-CNN마저도 bounding box (bb short) 안에 있는 물체를 분류하는 작업과, bb를 만드는 작업을 따로 했었다. R-CNN과 Fast R-CNN은 selective search를 통해 bb를 추청하고 서로 다른 방법으로 계산을 했다. Faster R-CNN은 bb를 추정하는 방법을 selective search에서 deep learning으로 바꿔서 좋은 결과와 속도를 얻었지만, 그래도 bb 만드는 network따로, object classification하는 network따로 있다. 
+
+(자세한 내용은 Faster R-CNN [blogpost](https://v6x-study.github.io/object-detection/Faster-RCNN/# 참조))
+
+## Yolo의 기본
+
+Yolo는 image detection을 regression problem으로 바꿔서 학습한다. 단순히 neural net을 input image에 돌리면, bb parameter들과 class prediction이 나오도록 학습을 시켰다.
+
+#### 절차 
+
+Input image를 $$S$$x$$S$$ grid로 나누는것이 Yolo의 핵심이다. 이  $$S$$x$$S$$ grid에 하나의 박스를 논문에서는 grid cell이라고 부른아. 각각의 grid cell들은 $$B$$개의 bb와 그것에 맞는 confidence score을 predict한다. 
+
+bb prediction는, 5개의 prediction을 갖고 있다: $$x,y,w,h,confidence$$.
+
+- $$(x,y)$$는 center of the box relative to the bounds of grid cell을 뜻한다 
+- $$(w,h)$$ 는 전체 이미지에 상대적으로 predict한다 
+
+##### Confidence
+
+여기서 잠시 Confidenc score을 짚고 넘어가보자. 눈문에서는 confidence를 $$Probability(Object)*IOU^{truth}_{pred}$$ 로 정의한다. 이걸 사람언어로 풀어보면, 얼마나 이 bb가 어떤 물체를 담고 있을 확률(Probability(Object))과 진짜 bb와 predict한 bb가 얼마나 비슷한가 (IOU)를 곱해준 값이다. 
+
+![IOU](/Users/chadpaik/Desktop/iou_equation.png)
+
+(Image from [pyimagesearch]( https://www.pyimagesearch.com/2016/11/07/intersection-over-union-iou-for-object-detection/))
+
+마지막으로, $$C$$ 개의 object들의 따른 probability도 predict 한다 (마치 그냥 image classification할때처럼).
+
+결론적으로, input image에 대헤서 나오는 최종적인 prediction은 $$S \times S \times (5B + C)$$tensor를 만들어 낸다. 
+
+논문에서는 $$S = 7$$, $$B=2$$, $$C=20$$, 였으니까 마지막 나온 결과는 $$7 \times 7 \times 30$$tensor였다. $$7 \times 7$$ grid, $$2$$ 개의 bb per grid, 그리고 $$20$$개의 물체들. 
+
+
+
+### 구조 
+
+구조는 의외로 간단하다. 그냥 Conv만 주구장창 쌓고, 마지막에 FC layer 2층 쌓으면서  원하는 tensor parameter 수를 맞춰주고, reshape을 해주면 된다.
+
+![Screen Shot 2019-02-23 at 11.20.55 PM](/Users/chadpaik/Desktop/architecture.png)
+
+(image from original YOLO Paper)
+
+논문에서는 conv layer 24층을 쌓는데 이 conv layer들은 ImageNet classification에서 $$224 \times 224$$ input으로 pretrain 시킨다. 마지막 layer은 linear activation을 쓰고, 나머지 layer들은 LeakyReLU activation을 사용하였다.
+
+아무래도 마지막 prediction에서 한꺼번에  여러개의 정보를 predict하니까, loss function도 그거에 맞게 많이 조절을 해줘야 한다. 논문에서는 이 multipart loss function을 이렇게 정리한다. 
+
+![Screen Shot 2019-02-23 at 11.32.03 PM](/Users/chadpaik/Desktop/loss.png)
+
+상세한 내용까지 정리해보면 이렇다:
+
+- 135 Epochs used
+- Pascal VOC 2007 과 2012 dataset 
+- Batch Size of 64
+- Moentum of 0.9 and decay of 0.0005
+- Learning Rate: First few epochs, lr raised from $$10^{-3}$$ to $$10^{-2}$$. 처음부터 너무 높은 lr쓰면 gradient가 unstable하다고 한다. 나중에는 다시 $$10^{-3}$$로 가고, 마지막 30 epoch은 $$10^{-4}$$ 까지 떨어트린다. 
+- Overfitting을 막기위해 Dropout layer with rate = 0.5 를 첫 connected layer후에 썼다고 한다. 
+
